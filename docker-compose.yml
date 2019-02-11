@@ -21,6 +21,9 @@ services:
         - ${CONTAINER_REGISTRY_BASE}/varnish
     depends_on:
       - db
+    environment:
+      - TRUSTED_HOSTS=^((api|admin|client)\.)?${DOMAIN_NAME}$$
+      - CORS_ALLOW_ORIGIN=^${HTTP_OR_SSL}((admin|api|www).)?${DOMAIN_NAME}$$
     volumes:
       - ./api:/srv/api:rw,cached
 
