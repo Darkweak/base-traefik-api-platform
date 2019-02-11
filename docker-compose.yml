@@ -1,6 +1,15 @@
 version: '3.4'
 
 services:
+  traefik:
+    image: traefik
+    command: --api --docker
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+
   php:
     image: ${CONTAINER_REGISTRY_BASE}/php
     build:
@@ -12,11 +21,8 @@ services:
         - ${CONTAINER_REGISTRY_BASE}/varnish
     depends_on:
       - db
-    # Comment out these volumes in production
     volumes:
       - ./api:/srv/api:rw,cached
-      # If you develop on Linux, uncomment the following line to use a bind-mounted host directory instead
-      # - ./api/var:/srv/api/var:rw
 
   api:
     image: ${CONTAINER_REGISTRY_BASE}/nginx
@@ -29,11 +35,10 @@ services:
         - ${CONTAINER_REGISTRY_BASE}/varnish
     depends_on:
       - php
-    # Comment out this volume in production
     volumes:
       - ./api/public:/srv/api/public:ro
-    ports:
-      - "8080:80"
+    labels:
+      - traefik.frontend.rule=Host:api.${DOMAIN_NAME}
 
   cache-proxy:
     image: ${CONTAINER_REGISTRY_BASE}/varnish
@@ -50,27 +55,19 @@ services:
       - ./api/docker/varnish/conf:/usr/local/etc/varnish:ro
     tmpfs:
       - /usr/local/var/varnish:exec
-    ports:
-      - "8081:80"
+    labels:
+      - traefik.frontend.rule=Host:cache.${DOMAIN_NAME}
 
   db:
-    # In production, you may want to use a managed database service
     image: postgres:10-alpine
     environment:
       - POSTGRES_DB=api
       - POSTGRES_USER=api-platform
-      # You should definitely change the password in production
       - POSTGRES_PASSWORD=!ChangeMe!
     volumes:
       - db-data:/var/lib/postgresql/data:rw
-      # You may use a bind-mounted host directory instead, so that it is harder to accidentally remove the volume and lose all your data!
-      # - ./docker/db/data:/var/lib/postgresql/data:rw
-    ports:
-      - "5432:5432"
 
   client:
-    # Use a static website hosting service in production
-    # See https://github.com/facebookincubator/create-react-app/blob/master/packages/react-scripts/template/README.md#deployment
     image: ${CONTAINER_REGISTRY_BASE}/client
     build:
       context: ./client
@@ -78,15 +75,18 @@ services:
         - ${CONTAINER_REGISTRY_BASE}/client
     env_file:
       - ./client/.env
+    environment:
+      - REACT_APP_API_ENTRYPOINT=${HTTP_OR_SSL}api.${DOMAIN_NAME}
     volumes:
       - ./client:/usr/src/client:rw,cached
       - /usr/src/client/node_modules
-    ports:
-      - "80:3000"
+    expose:
+      - 3000
+    labels:
+      - traefik.frontend.rule=Host:${DOMAIN_NAME},www.${DOMAIN_NAME}
+      - traefik.port=3000
 
   admin:
-    # Use a static website hosting service in production
-    # See https://github.com/facebookincubator/create-react-app/blob/master/packages/react-scripts/template/README.md#deployment
     image: ${CONTAINER_REGISTRY_BASE}/admin
     build:
       context: ./admin
@@ -95,23 +95,13 @@ services:
     volumes:
       - ./admin:/usr/src/admin:rw,cached
       - /usr/src/admin/node_modules
-    ports:
-      - "81:3000"
-
-  h2-proxy:
-    # Don't use this proxy in prod
-    build:
-      context: ./h2-proxy
-    depends_on:
-      - client
-      - admin
-      - api
-      - cache-proxy
-    ports:
-      - "443:443"
-      - "444:444"
-      - "8443:8443"
-      - "8444:8444"
+    environment:
+      - REACT_APP_API_ENTRYPOINT=${HTTP_OR_SSL}api.${DOMAIN_NAME}
+    expose:
+      - 3000
+    labels:
+      - traefik.frontend.rule=Host:admin.${DOMAIN_NAME}
+      - traefik.port=3000
 
 volumes:
   db-data: {}
